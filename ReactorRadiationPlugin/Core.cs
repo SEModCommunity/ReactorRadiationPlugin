@@ -35,6 +35,7 @@ namespace ReactorRadiationPlugin
 		protected TimeSpan m_timeSinceLastUpdate;
 		protected DateTime m_lastUpdate;
 		protected DateTime m_lastFullScan;
+		protected DateTime m_lastRadiationDamage;
 
 		#endregion
 
@@ -46,11 +47,12 @@ namespace ReactorRadiationPlugin
 
 			m_isActive = false;
 
-			m_radiationRange = 10;
+			m_radiationRange = 5;
 			m_damageRate = 1;
 
 			m_lastUpdate = DateTime.Now;
 			m_lastFullScan = DateTime.Now;
+			m_lastRadiationDamage = DateTime.Now;
 			m_timeSinceLastUpdate = DateTime.Now - m_lastUpdate;
 		}
 
@@ -107,11 +109,19 @@ namespace ReactorRadiationPlugin
 			m_timeSinceLastUpdate = DateTime.Now - m_lastUpdate;
 			m_lastUpdate = DateTime.Now;
 
-			foreach (var entry in m_reactorMap)
+			TimeSpan timeSinceLastRadiation = DateTime.Now - m_lastRadiationDamage;
+			if (timeSinceLastRadiation.TotalMilliseconds > 1000)
 			{
-				foreach (ReactorEntity reactor in entry.Value)
+				m_lastRadiationDamage = DateTime.Now;
+
+				List<CharacterEntity> characters = SectorObjectManager.Instance.GetTypedInternalData<CharacterEntity>();
+
+				foreach (var entry in m_reactorMap)
 				{
-					DoRadiationDamage(reactor);
+					foreach (ReactorEntity reactor in entry.Value)
+					{
+						DoRadiationDamage(characters, reactor);
+					}
 				}
 			}
 
@@ -241,7 +251,7 @@ namespace ReactorRadiationPlugin
 			}
 		}
 
-		private void DoRadiationDamage(ReactorEntity source)
+		private void DoRadiationDamage(List<CharacterEntity> targets, ReactorEntity source)
 		{
 			if (source == null)
 				return;
@@ -250,23 +260,19 @@ namespace ReactorRadiationPlugin
 			if (!source.Enabled)
 				return;
 
-			List<CharacterEntity> characters = SectorObjectManager.Instance.GetTypedInternalData<CharacterEntity>();
-
-			//TODO - Check if this is accurate at all for calculating the beacon's actual location
-			//The parent's position might not be at cubegrid 0,0,0 and might be at center of mass which is going to be hard to calculate
-			Vector3I beaconBlockPos = source.Min;
+			Vector3I blockGridPos = source.Min;
 			Matrix matrix = source.Parent.PositionAndOrientation.GetMatrix();
 			Matrix orientation = matrix.GetOrientation();
-			Vector3 rotatedBlockPos = Vector3.Transform((Vector3)beaconBlockPos * 2.5f, orientation);
-			Vector3 beaconPos = rotatedBlockPos + source.Parent.Position;
+			Vector3 rotatedBlockPos = Vector3.Transform((Vector3)blockGridPos * 2.5f, orientation);
+			Vector3 reactorPos = rotatedBlockPos + source.Parent.Position;
 
-			foreach (CharacterEntity character in characters)
+			foreach (CharacterEntity character in targets)
 			{
-				double distance = Vector3.Distance(character.Position, beaconPos);
-				if (distance < _RadiationRange)
+				double distance = Vector3.Distance(character.Position, reactorPos);
+				double range = 0.05 * source.Power * _RadiationRange;
+				if (distance < range)
 				{
-					//TODO - Scale the damage based on the current power output of the reactor
-					double damage = _DamageRate * m_timeSinceLastUpdate.TotalSeconds * (_RadiationRange - distance);
+					double damage = _DamageRate * m_timeSinceLastUpdate.TotalSeconds * (range - distance);
 					character.Health = character.Health - (float)damage;
 				}
 			}
