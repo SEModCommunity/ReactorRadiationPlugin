@@ -22,7 +22,7 @@ using VRageMath;
 
 namespace ReactorRadiationPlugin
 {
-	public class Core : PluginBase, ICubeBlockEventHandler
+	public class Core : PluginBase
 	{
 		#region "Attributes"
 
@@ -140,38 +140,6 @@ namespace ReactorRadiationPlugin
 			m_isActive = false;
 		}
 
-		public void OnCubeBlockCreated(CubeBlockEntity cubeBlock)
-		{
-			if (!m_isActive)
-				return;
-
-			if (cubeBlock == null || cubeBlock.IsDisposed)
-				return;
-
-			CubeGridEntity cubeGrid = cubeBlock.Parent;
-
-			//Do some data validating
-			if (cubeGrid == null)
-				return;
-			if (cubeGrid.IsDisposed)
-				return;
-			if (cubeGrid.GridSizeEnum != MyCubeSize.Large)
-				return;
-
-			//TODO - Do stuff
-		}
-
-		public void OnCubeBlockDeleted(CubeBlockEntity cubeBlock)
-		{
-			if (!m_isActive)
-				return;
-
-			if (cubeBlock == null)
-				return;
-
-			//TODO - Do stuff
-		}
-
 		#endregion
 
 		private void CleanUpReactorMap()
@@ -269,10 +237,12 @@ namespace ReactorRadiationPlugin
 			foreach (CharacterEntity character in targets)
 			{
 				double distance = Vector3.Distance(character.Position, reactorPos);
-				double range = 0.05 * source.Power * _RadiationRange;
-				if (distance < range)
+
+				float leakingRadiation = 0.1f + (0.5f * (1.0f / source.IntegrityPercent) - 0.5f);
+				float reactorRange = 5.0f + 0.2f * source.Power;
+				if (distance <= reactorRange)
 				{
-					double damage = _DamageRate * m_timeSinceLastUpdate.TotalSeconds * (range - distance);
+					double damage = _DamageRate * m_timeSinceLastUpdate.TotalSeconds * (reactorRange / distance) * leakingRadiation;
 					character.Health = character.Health - (float)damage;
 				}
 			}
