@@ -28,6 +28,7 @@ namespace ReactorRadiationPlugin
 
 		private bool m_isActive;
 		private Dictionary<CubeGridEntity, List<ReactorEntity>> m_reactorMap;
+		private Thread m_mainUpdateLoop;
 
 		private static float m_radiationRange;
 		private static float m_damageRate;
@@ -46,6 +47,7 @@ namespace ReactorRadiationPlugin
 			m_reactorMap = new Dictionary<CubeGridEntity, List<ReactorEntity>>();
 
 			m_isActive = false;
+			m_mainUpdateLoop = new Thread(MainUpdate);
 
 			m_radiationRange = 5;
 			m_damageRate = 1;
@@ -103,44 +105,95 @@ namespace ReactorRadiationPlugin
 
 		public override void Update()
 		{
-			if (!m_isActive)
-				return;
-
-			m_timeSinceLastUpdate = DateTime.Now - m_lastUpdate;
-			m_lastUpdate = DateTime.Now;
-
-			TimeSpan timeSinceLastRadiation = DateTime.Now - m_lastRadiationDamage;
-			if (timeSinceLastRadiation.TotalMilliseconds > 1000)
+			if (!m_mainUpdateLoop.IsAlive)
 			{
-				m_lastRadiationDamage = DateTime.Now;
-
-				List<CharacterEntity> characters = SectorObjectManager.Instance.GetTypedInternalData<CharacterEntity>();
-
-				foreach (var entry in m_reactorMap)
-				{
-					foreach (ReactorEntity reactor in entry.Value)
-					{
-						DoRadiationDamage(characters, reactor);
-					}
-				}
-			}
-
-			TimeSpan timeSinceLastFullScan = DateTime.Now - m_lastFullScan;
-			if (timeSinceLastFullScan.TotalMilliseconds > 30000)
-			{
-				m_lastFullScan = DateTime.Now;
-
-				CleanUpReactorMap();
-				FullScan();
+				m_mainUpdateLoop.Start();
 			}
 		}
 
 		public override void Shutdown()
 		{
+			m_mainUpdateLoop.Interrupt();
+
 			m_isActive = false;
 		}
 
 		#endregion
+
+		protected void MainUpdate()
+		{
+			DateTime lastFullScan = DateTime.Now;
+			DateTime lastMainLoop = DateTime.Now;
+			TimeSpan timeSinceLastMainLoop = DateTime.Now - lastMainLoop;
+			float averageMainLoopInterval = 0;
+			float averageMainLoopTime = 0;
+			DateTime lastProfilingMessage = DateTime.Now;
+			TimeSpan timeSinceLastProfilingMessage = DateTime.Now - lastProfilingMessage;
+
+			while (m_isActive)
+			{
+				try
+				{
+					DateTime mainLoopStart = DateTime.Now;
+
+					m_timeSinceLastUpdate = DateTime.Now - m_lastUpdate;
+					m_lastUpdate = DateTime.Now;
+
+					TimeSpan timeSinceLastRadiation = DateTime.Now - m_lastRadiationDamage;
+					if (timeSinceLastRadiation.TotalMilliseconds > 1000)
+					{
+						m_lastRadiationDamage = DateTime.Now;
+
+						List<CharacterEntity> characters = SectorObjectManager.Instance.GetTypedInternalData<CharacterEntity>();
+
+						foreach (var entry in m_reactorMap)
+						{
+							foreach (ReactorEntity reactor in entry.Value)
+							{
+								DoRadiationDamage(characters, reactor);
+							}
+						}
+					}
+
+					TimeSpan timeSinceLastFullScan = DateTime.Now - m_lastFullScan;
+					if (timeSinceLastFullScan.TotalMilliseconds > 30000)
+					{
+						m_lastFullScan = DateTime.Now;
+
+						CleanUpReactorMap();
+						FullScan();
+					}
+
+					timeSinceLastMainLoop = DateTime.Now - lastMainLoop;
+					lastMainLoop = DateTime.Now;
+
+					//Performance profiling
+					if (SandboxGameAssemblyWrapper.IsDebugging)
+					{
+						TimeSpan mainLoopRunTime = DateTime.Now - mainLoopStart;
+						averageMainLoopInterval = (averageMainLoopInterval + (float)timeSinceLastMainLoop.TotalMilliseconds) / 2;
+						averageMainLoopTime = (averageMainLoopTime + (float)mainLoopRunTime.TotalMilliseconds) / 2;
+						timeSinceLastProfilingMessage = DateTime.Now - lastProfilingMessage;
+						if (timeSinceLastProfilingMessage.TotalSeconds > 60)
+						{
+							lastProfilingMessage = DateTime.Now;
+
+							LogManager.APILog.WriteLine("ReactorRadiationPlugin - Average main loop interval: " + Math.Round(averageMainLoopInterval, 2).ToString() + "ms");
+							LogManager.APILog.WriteLine("ReactorRadiationPlugin - Average main loop time: " + Math.Round(averageMainLoopTime, 2).ToString() + "ms");
+						}
+					}
+
+					//Pause between loops
+					int nextSleepTime = Math.Min(500, Math.Max(250, 250 + (250 - (int)timeSinceLastMainLoop.TotalMilliseconds) / 2));
+					Thread.Sleep(nextSleepTime);
+				}
+				catch (Exception ex)
+				{
+					LogManager.ErrorLog.WriteLine(ex);
+					Thread.Sleep(5000);
+				}
+			}
+		}
 
 		private void CleanUpReactorMap()
 		{
